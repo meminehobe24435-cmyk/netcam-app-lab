@@ -16,8 +16,8 @@
 #include <sys/types.h>
 #if defined(_WIN32)
 #  include <direct.h>   /* _mkdir */
-#  ifndef S_IFDIR
-#    define S_IFDIR _S_IFDIR
+#  ifndef S_ISDIR
+#    define S_ISDIR(m) (((m) & _S_IFDIR) != 0)
 #  endif
 #endif
 
@@ -88,8 +88,14 @@ ntc_status_t ntc_mkdir(const char *dir)
     }
 #endif
     {
+        /*
+         * S_ISDIR is the POSIX way to ask "is this a directory".  Testing the
+         * mode bits against S_IFDIR directly (which an earlier revision did)
+         * compiles on Windows/MinGW but fails on glibc with
+         * "'S_IFDIR' undeclared" -- caught by the Linux CI job.
+         */
         struct stat st;
-        if (stat(dir, &st) == 0 && (st.st_mode & S_IFDIR) != 0) {
+        if (stat(dir, &st) == 0 && S_ISDIR(st.st_mode)) {
             return NTC_OK; /* already there: not an error */
         }
     }
