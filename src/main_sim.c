@@ -362,6 +362,8 @@ static int stage_media(FILE *txt, size_t reorder_window, size_t *sent_out,
                (unsigned)acc_units_complete);
         printf("  NAL units dropped         : %u\n",
                (unsigned)acc_units_dropped);
+        printf("  fragments handed in       : %u\n",
+               (unsigned)acc_fragments_in);
         printf("  bytes reassembled         : %u\n",
                (unsigned)acc_bytes_reassembled);
         printf("  byte-exact frames         : %u of %u completed\n",

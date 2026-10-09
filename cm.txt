@@ -1,5 +1,6 @@
-﻿rtp: add the missing newline at end of file
+﻿sim: report the fragment count so the accumulator is used
 
-clang's -Wnewline-eof (part of -Wall, fatal under -Werror) rejects a file with no
-final newline; gcc does not warn about it, so only the clang CI jobs caught it.
-All sources are now checked to end with exactly one newline.
+clang's -Wunused-but-set-variable (fatal under -Werror) rejected the accumulated
+fragment counter because it was summed but never printed. Printing it also makes
+the stage report complete: fragments handed in vs units completed vs units
+dropped.
