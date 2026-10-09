@@ -26,6 +26,14 @@
 /* harness                                                             */
 /* ------------------------------------------------------------------ */
 
+/*
+ * printf("%llu") is not portable for uint64_t: on Windows the type is
+ * unsigned long long but on glibc it is unsigned long, so passing one
+ * directly fails -Wformat (and CI builds with -Werror).  Every 64-bit value
+ * that reaches printf goes through this cast.
+ */
+#define U64(v) ((unsigned long long)(v))
+
 static int g_checks = 0;
 static int g_fails = 0;
 static const char *g_group = "?";
@@ -2007,8 +2015,8 @@ static void test_rtp_network_run(void)
         char key[64];
         printf("     w=%3u lost=%llu delivered=%llu ooo=%llu late=%llu "
                "dup=%llu\n",
-               (unsigned)WINDOWS[w], w_lost[w], w_out[w], w_ooo[w], w_late[w],
-               w_dup[w]);
+               (unsigned)WINDOWS[w], U64(w_lost[w]), U64(w_out[w]),
+               U64(w_ooo[w]), U64(w_late[w]), U64(w_dup[w]));
         sprintf(key, "rtp_window_%u_lost", (unsigned)WINDOWS[w]);
         measured(key, w_lost[w]);
         sprintf(key, "rtp_window_%u_delivered", (unsigned)WINDOWS[w]);
@@ -3119,7 +3127,7 @@ static void test_motion_scripted(void)
 
         printf("   scripted 60 frames: naive alarms=%llu, debounced alarms=%llu"
                " (2 real events, 3 single-frame noise blips)\n",
-               a.events_started, b.events_started);
+               U64(a.events_started), U64(b.events_started));
 
         /* With the shipped 25-frame cooldown the second event is suppressed
          * as an alarm storm: that is the anti-storm rule doing its job, not a

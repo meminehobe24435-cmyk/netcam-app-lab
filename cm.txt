@@ -1,0 +1,5 @@
+﻿tests: print 64-bit counters portably
+
+uint64_t is unsigned long long on Windows but unsigned long on glibc, so passing
+it straight to "%llu" is a -Wformat error under -Werror -- caught by the Linux CI
+job. All 64-bit printf arguments now go through an explicit cast macro.
