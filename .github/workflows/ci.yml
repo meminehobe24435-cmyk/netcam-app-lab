@@ -1,0 +1,90 @@
+name: ci
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    name: ${{ matrix.os }} / ${{ matrix.cc }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, macos-latest ]
+        cc: [ gcc, clang ]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build (make)
+        env:
+          CC: ${{ matrix.cc }}
+        run: make
+
+      - name: Run the self-checking test suite
+        env:
+          CC: ${{ matrix.cc }}
+        run: |
+          make test 2>&1 | tee test-output.txt
+          # Fail if the suite did not actually assert anything meaningful.
+          grep -E '^[0-9]+ checks passed$' test-output.txt
+
+      - name: Run the end-to-end simulation
+        env:
+          CC: ${{ matrix.cc }}
+        run: |
+          # Do NOT pipe this into head/tail: the reader exiting early gives the
+          # program SIGPIPE and the job goes red for the wrong reason.  Write to
+          # a file, then read the file.
+          make sim > sim-output.txt 2>&1
+          cat sim-output.txt
+          test -f results/simulation.txt
+          test -f results/summary.csv
+          test -f results/rtp_windows.csv
+          # The simulation must not report a corrupted reassembled frame.
+          grep -q 'content mismatches        : 0' sim-output.txt
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports-${{ matrix.os }}-${{ matrix.cc }}
+          path: |
+            results/
+            test-output.txt
+            sim-output.txt
+          if-no-files-found: ignore
+
+  sanitizers:
+    name: ubuntu-latest / gcc / ASan+UBSan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the test suite with ASan and UBSan
+        run: |
+          mkdir -p build
+          gcc -std=c99 -Wall -Wextra -Wpedantic -g -O1 -ffp-contract=off \
+              -fsanitize=address,undefined -fno-omit-frame-pointer \
+              -Isrc \
+              src/rtp.c src/rtsp.c src/nal.c src/motion.c src/record.c \
+              src/util.c test/test_netcam.c \
+              -o build/test_asan -lm
+
+      - name: Run under the sanitizers
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: |
+          ./build/test_asan 2>&1 | tee asan-output.txt
+          grep -E '^[0-9]+ checks passed$' asan-output.txt
+
+      - name: Upload sanitizer output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: asan-output
+          path: asan-output.txt
+          if-no-files-found: ignore
