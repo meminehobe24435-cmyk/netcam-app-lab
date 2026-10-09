@@ -1,5 +1,5 @@
-﻿tests: print 64-bit counters portably
+﻿rtp: add the missing newline at end of file
 
-uint64_t is unsigned long long on Windows but unsigned long on glibc, so passing
-it straight to "%llu" is a -Wformat error under -Werror -- caught by the Linux CI
-job. All 64-bit printf arguments now go through an explicit cast macro.
+clang's -Wnewline-eof (part of -Wall, fatal under -Werror) rejects a file with no
+final newline; gcc does not warn about it, so only the clang CI jobs caught it.
+All sources are now checked to end with exactly one newline.
