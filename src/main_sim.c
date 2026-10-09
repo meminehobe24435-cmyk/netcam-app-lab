@@ -183,10 +183,29 @@ static int stage_rtsp(ntc_rtsp_server_t *srv, FILE *txt, uint32_t *session_io)
 /* stage 2-4: media -> packets -> network -> reorder -> reassembly     */
 /* ------------------------------------------------------------------ */
 
-static int stage_media(FILE *txt, size_t reorder_window, size_t *sent_out,
-                       size_t *delivered_out, size_t *lost_out,
-                       size_t *exact_out)
+typedef struct media_summary {
+    size_t frames;
+    size_t sent;
+    size_t after_network;
+    size_t dropped_by_network;
+    size_t duplicated_by_network;
+    size_t delivered;
+    size_t declared_lost;
+    size_t late;
+    size_t duplicates_detected;
+    size_t units_complete;
+    size_t units_dropped;
+    size_t fragments_in;
+    size_t bytes_reassembled;
+    size_t byte_exact_frames;
+    size_t content_mismatches;
+    size_t reorder_window;
+    int corrupt;
+} media_summary_t;
+
+static media_summary_t stage_media(FILE *txt, size_t reorder_window)
 {
+    media_summary_t sum;
     ntc_rtp_sender_t sender;
     ntc_net_profile_t prof;
     ntc_rtp_rx_t *rx = (ntc_rtp_rx_t *)calloc(1, sizeof(*rx));
@@ -196,6 +215,8 @@ static int stage_media(FILE *txt, size_t reorder_window, size_t *sent_out,
     size_t lens[1];
     size_t sent = 0;
     size_t after_net = 0;
+    size_t net_dropped = 0;
+    size_t net_duplicated = 0;
     size_t dropped = 0;
     size_t duplicated = 0;
     size_t delivered = 0;
@@ -207,6 +228,11 @@ static int stage_media(FILE *txt, size_t reorder_window, size_t *sent_out,
     size_t acc_bytes_reassembled = 0;
     size_t f;
 
+    memset(&sum, 0, sizeof(sum));
+    sum.reorder_window = reorder_window;
+    sum.frames = FRAMES;
+    sum.corrupt = 1;
+
     banner("stage 2-4: media -> RTP -> network -> reorder -> reassembly");
 
     if (rx == NULL || reasm == NULL || src == NULL) {
@@ -214,14 +240,14 @@ static int stage_media(FILE *txt, size_t reorder_window, size_t *sent_out,
         free(rx);
         free(reasm);
         free(src);
-        return 0;
+        return sum;
     }
     if (ntc_rtp_sender_init(&sender, 0xCAFEBABEu, 96, 1200) != NTC_OK ||
         ntc_net_profile_default(&prof, 20240301u) != NTC_OK) {
         free(rx);
         free(reasm);
         free(src);
-        return 0;
+        return sum;
     }
     /*
      * The receiver is initialised ONCE, before the frame loop, exactly like a
@@ -235,7 +261,7 @@ static int stage_media(FILE *txt, size_t reorder_window, size_t *sent_out,
         free(rx);
         free(reasm);
         free(src);
-        return 0;
+        return sum;
     }
     /*
      * A deliberately hostile channel: enough loss and reordering that the
@@ -284,6 +310,8 @@ static int stage_media(FILE *txt, size_t reorder_window, size_t *sent_out,
             break;
         }
         after_net += count;
+        net_dropped += dropped;
+        net_duplicated += duplicated;
 
         if (ntc_nal_reasm_init(reasm) != NTC_OK) {
             ntc_net_free(dgrams, count);
@@ -347,10 +375,10 @@ static int stage_media(FILE *txt, size_t reorder_window, size_t *sent_out,
         ntc_rtp_stats_t rs;
         (void)ntc_rtp_rx_stats(rx, &rs);
 
-        printf("  frames sent               : %u\n", (unsigned)FRAMES);
         printf("  datagrams sent            : %u\n", (unsigned)sent);
         printf("  after the network         : %u (dropped %u, duplicated %u)\n",
-               (unsigned)after_net, (unsigned)dropped, (unsigned)duplicated);
+               (unsigned)after_net, (unsigned)net_dropped,
+               (unsigned)net_duplicated);
         printf("  delivered by the receiver : %u\n", (unsigned)delivered);
         printf("  declared lost / late      : %u / %u\n", (unsigned)rs.lost,
                (unsigned)rs.late);
@@ -376,8 +404,9 @@ static int stage_media(FILE *txt, size_t reorder_window, size_t *sent_out,
             fprintf(txt, "sim_frames=%u\n", (unsigned)FRAMES);
             fprintf(txt, "sim_datagrams_sent=%u\n", (unsigned)sent);
             fprintf(txt, "sim_after_network=%u\n", (unsigned)after_net);
-            fprintf(txt, "sim_dropped_by_network=%u\n", (unsigned)dropped);
-            fprintf(txt, "sim_duplicated_by_network=%u\n", (unsigned)duplicated);
+            fprintf(txt, "sim_dropped_by_network=%u\n", (unsigned)net_dropped);
+            fprintf(txt, "sim_duplicated_by_network=%u\n",
+                    (unsigned)net_duplicated);
             fprintf(txt, "sim_delivered=%u\n", (unsigned)delivered);
             fprintf(txt, "sim_declared_lost=%u\n", (unsigned)rs.lost);
             fprintf(txt, "sim_late=%u\n", (unsigned)rs.late);
@@ -392,16 +421,27 @@ static int stage_media(FILE *txt, size_t reorder_window, size_t *sent_out,
             fprintf(txt, "sim_content_mismatches=%u\n", (unsigned)mismatched);
             fprintf(txt, "sim_reorder_window=%u\n", (unsigned)reorder_window);
         }
-        if (sent_out != NULL) { *sent_out = sent; }
-        if (delivered_out != NULL) { *delivered_out = delivered; }
-        if (lost_out != NULL) { *lost_out = (size_t)rs.lost; }
-        if (exact_out != NULL) { *exact_out = matched; }
+        sum.sent = sent;
+        sum.after_network = after_net;
+        sum.dropped_by_network = net_dropped;
+        sum.duplicated_by_network = net_duplicated;
+        sum.delivered = delivered;
+        sum.declared_lost = (size_t)rs.lost;
+        sum.late = (size_t)rs.late;
+        sum.duplicates_detected = (size_t)rs.duplicates;
+        sum.units_complete = acc_units_complete;
+        sum.units_dropped = acc_units_dropped;
+        sum.fragments_in = acc_fragments_in;
+        sum.bytes_reassembled = acc_bytes_reassembled;
+        sum.byte_exact_frames = matched;
+        sum.content_mismatches = mismatched;
+        sum.corrupt = (mismatched == 0) ? 0 : 1;
     }
 
     free(rx);
     free(reasm);
     free(src);
-    return mismatched == 0 ? 1 : 0;
+    return sum;
 }
 
 /* ------------------------------------------------------------------ */
@@ -681,10 +721,13 @@ int main(void)
     ntc_rtsp_server_t *srv =
         (ntc_rtsp_server_t *)calloc(1, sizeof(ntc_rtsp_server_t));
     uint32_t session = 0;
+    media_summary_t media;
     size_t sent = 0;
     size_t delivered = 0;
     size_t lost = 0;
     size_t exact = 0;
+
+    memset(&media, 0, sizeof(media));
     int ok = 1;
 
     setvbuf(stdout, NULL, _IONBF, 0);
@@ -721,7 +764,8 @@ int main(void)
     }
 
     ok = stage_rtsp(srv, txt, &session) && ok;
-    ok = stage_media(txt, 8u, &sent, &delivered, &lost, &exact) && ok;
+    media = stage_media(txt, 8u);
+    ok = (media.corrupt == 0) && ok;
     window_study(csv);
     stage_motion(txt);
     stage_recording(txt);

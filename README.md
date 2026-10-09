@@ -159,12 +159,14 @@ A 3000-byte NAL unit at a 1200-byte packet budget:
 | Measurement | Value |
 |---|---|
 | Datagrams sent | 90 |
+| Dropped by the network / duplicated by the network | **12 / 2** |
 | Reached the receiver | 80 |
 | Delivered to the application | 77 |
 | Declared lost / late | 13 / 0 |
 | Duplicates detected | 2 |
 | NAL units reassembled | **18** |
 | NAL units dropped (a fragment missing) | **7** |
+| Fragments handed to the reassembler | 77 |
 | Bytes reassembled | 54 000 |
 | **Frames that were byte-exact** | **18 of 18 completed** |
 | **Frames containing corrupted content** | **0** |
@@ -373,7 +375,27 @@ reconstructed from the ring. An external, independent gap count is computed in
 the test and compared against the counter, which is what makes the fix
 verifiable rather than self-referential.
 
-### 6. Two smaller ones worth recording
+### 6. A counter written through an out-parameter did not survive the loop
+
+**Symptom** the end-to-end simulation reported "after the network: 80"
+having sent 90 datagrams, but "dropped: 0". Printing the counter inside the
+frame loop showed the right per-frame values (0, 1, 2 ...), and the final
+report showed 0.
+
+**Root cause** never fully explained. The per-frame values were correct, no
+stack canary placed around the packet arrays was ever tripped, and the value
+was written by `ntc_net_apply()` through a plain `size_t *` out-parameter.
+Whatever the compiler did with it, the accumulated value did not survive to
+the end of the loop.
+
+**Fix** the counters are now accumulated with explicit `+=` inside the loop
+body and the result is returned in a struct rather than through out-pointers,
+which removes the question entirely and reads better at the call site. Rather
+than hide the discrepancy, the numbers were checked for internal consistency:
+`sent - dropped + duplicated == after_network` (90 - 12 + 2 = 80) now holds,
+and it did not hold while the counter was wrong.
+
+### 7. Two smaller ones worth recording
 
 * **RTSP method tokens were matched case-insensitively.** `play` was accepted as
   `PLAY`. Method tokens are case sensitive and header field names are not; the

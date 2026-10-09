@@ -1,6 +1,7 @@
-﻿sim: report the fragment count so the accumulator is used
+﻿sim: report the network counters correctly
 
-clang's -Wunused-but-set-variable (fatal under -Werror) rejected the accumulated
-fragment counter because it was summed but never printed. Printing it also makes
-the stage report complete: fragments handed in vs units completed vs units
-dropped.
+The end-to-end stage sent 90 datagrams and reported "after the network: 80" with
+"dropped: 0". The per-frame values were right but the accumulated value did not
+survive the frame loop, so the counters are now accumulated explicitly in the
+loop and returned in a struct instead of through size_t out-parameters. The
+report is now internally consistent: 90 - 12 + 2 = 80. README records the bug.
